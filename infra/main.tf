@@ -18,7 +18,7 @@ provider "google" {
 
 resource "google_project" "default" {
   provider        = google
-  name            = var.project_name
+  name            = "Bee CI"
   project_id      = var.project_id
   billing_account = var.billing_account_id
 
