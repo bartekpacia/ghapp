@@ -27,12 +27,35 @@ resource "google_project" "default" {
   # }
 }
 
-# resource "google_project_service" "artifact_registry" {
-#   project = google_project.my_project.project_id
-#   service = "artifactregistry.googleapis.com"
-# }
+#resource "google_project_service" "default" {
+#  provider = google
+#  project  = google_project.default.project_id
+#  for_each = toset([
+#    "serviceusage.googleapis.com",
+#    #"artifactregistry.googleapis.com",
+#    #"run.googleapis.com",
+#  ])
+#  service = each.key
+#
+#  disable_on_destroy = true
+#}
 
-# resource "google_project_service" "cloud_run" {
-#   project = google_project.my_project.project_id
-#   service = "run.googleapis.com"
-# }
+
+resource "google_cloud_run_service" "default" {
+  name     = "main-cloud-run-service"
+  location = var.region
+
+  template {
+    spec {
+      containers {
+        image = "gcr.io/bee-ci/bee-ci:latest"
+      }
+    }
+  }
+
+  traffic {
+    percent         = 100
+    latest_revision = true
+  }
+}
+
