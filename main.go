@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -21,6 +22,7 @@ func main() {
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
+	slog.Info("request received!", slog.String("path", r.URL.Path))
 	fmt.Fprintln(w, "hello world")
 }
 
