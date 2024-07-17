@@ -46,7 +46,7 @@ resource "google_project_service" "default" {
 resource "google_artifact_registry_repository" "default" {
   project       = google_project.default.project_id
   location      = var.region
-  repository_id = "bee-ci"
+  repository_id = "my-default-repo"
   format        = "DOCKER"
   description   = "Default repo for our Docker images"
 }
@@ -55,8 +55,7 @@ resource "google_cloudbuild_trigger" "default" {
   project = google_project.default.project_id
   trigger_template {
     branch_name = "master"
-    repo_name   = "your-github-repo"
-
+    repo_name   = "ghapp"
   }
 
   # TODO: Migrate to
@@ -72,7 +71,7 @@ resource "google_cloud_run_service" "default" {
   template {
     spec {
       containers {
-        image = "gcr.io/bee-ci/bee-ci:latest"
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.default.repository_id}/bee-ci:latest"
         ports {
           container_port = 8080
         }

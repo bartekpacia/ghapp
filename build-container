@@ -5,4 +5,4 @@ PROJECT_ID=bee-ci
 
 gcloud builds submit \
   --project "$PROJECT_ID" \
-  --tag "us-central1-docker.pkg.dev/$PROJECT_ID/my-repo/bee-ci:latest"
+  --tag "us-central1-docker.pkg.dev/$PROJECT_ID/my-default-repo/bee-ci:latest"
