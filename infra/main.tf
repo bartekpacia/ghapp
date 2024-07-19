@@ -52,15 +52,32 @@ resource "google_artifact_registry_repository" "default" {
 }
 
 resource "google_cloudbuild_trigger" "default" {
-  project = google_project.default.project_id
-  trigger_template {
-    branch_name = "master"
-    repo_name   = "ghapp"
+  project  = google_project.default.project_id
+  location = var.region
+  name     = "my-default-trigger"
+  # trigger_template {
+  #   branch_name = "master"
+  #   repo_name   = "ghapp"
+  # }
+
+  github {
+    owner = "bartekpacia"
+    name  = "ghapp"
+    push {
+      branch = "add_infra" # master
+    }
   }
 
+  build {
+    step {
+      name             = "ubuntu"
+      args             = ["-c", "exit 1"]
+      allow_exit_codes = [1, 3]
+    }
+  }
   # TODO: Migrate to
   #  https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/cloudbuild_trigger#example-usage---cloudbuild-trigger-build
-  filename = "cloudbuild.yaml"
+  #filename = "cloudbuild.yaml"
 }
 
 resource "google_cloud_run_service" "default" {
