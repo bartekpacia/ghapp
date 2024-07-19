@@ -4,17 +4,26 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 )
 
 func main() {
+	log.Println("server is starting")
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/webhook", handleWebhook)
+	mux.HandleFunc("GET /", index)
+	mux.HandleFunc("POST /webhook", handleWebhook)
 
 	err := http.ListenAndServe(":8080", mux)
 	if err != nil {
 		log.Fatalln("Error listening: ", err)
 	}
+}
+
+func index(w http.ResponseWriter, r *http.Request) {
+	slog.Info("request received!", slog.String("path", r.URL.Path))
+	fmt.Fprintln(w, "hello world")
 }
 
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
