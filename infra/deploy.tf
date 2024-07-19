@@ -1,6 +1,7 @@
 # This file contains the deployment pipeline:
 # GitHub -> Cloud Build -> Artifact Registry -> Cloud Run
 
+# This should be imported to terraform
 #resource "google_cloudbuildv2_connection" "default" {
 #  project  = google_project.default.project_id
 #  location = var.region
@@ -10,6 +11,15 @@
 #   app_installation_id = var.github_app_installation_id 
 #  }
 #}
+
+resource "google_cloudbuildv2_repository" "default" {
+  project  = google_project.default.project_id
+  location = var.region
+  name     = "my-github-repository-tf"
+
+  parent_connection = "my-cloud-build-connection-manual"
+  remote_uri        = "https://github.com/bartekpacia/ghapp.git"
+}
 
 resource "google_cloudbuild_trigger" "default" {
   project  = google_project.default.project_id
@@ -43,11 +53,6 @@ resource "google_cloudbuild_trigger" "default" {
     }
   }
 }
-
-# resource "google_cloudbuildv2_repository" "name" {
-
-# }
-
 
 resource "google_artifact_registry_repository" "default" {
   project       = google_project.default.project_id
