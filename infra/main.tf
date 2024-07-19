@@ -19,7 +19,6 @@ provider "google" {
 }
 
 resource "google_project" "default" {
-  provider        = google
   name            = "Bee CI"
   project_id      = var.project_id
   billing_account = var.billing_account_id
@@ -40,82 +39,5 @@ resource "google_project_service" "default" {
   for_each = toset(var.required_services)
   service  = each.key
 
-  disable_on_destroy = true
+  disable_on_destroy = false
 }
-
-resource "google_artifact_registry_repository" "default" {
-  project       = google_project.default.project_id
-  location      = var.region
-  repository_id = "my-default-repo"
-  format        = "DOCKER"
-  description   = "Default repo for our Docker images"
-}
-
-resource "google_cloudbuild_trigger" "default" {
-  project  = google_project.default.project_id
-  location = var.region
-  name     = "my-default-trigger"
-  # trigger_template {
-  #   branch_name = "master"
-  #   repo_name   = "ghapp"
-  # }
-
-  github {
-    owner = "bartekpacia"
-    name  = "ghapp"
-    push {
-      branch = "add_infra" # master
-    }
-  }
-
-  build {
-    step {
-      name             = "ubuntu"
-      args             = ["-c", "exit 1"]
-      allow_exit_codes = [1, 3]
-    }
-  }
-  # TODO: Migrate to
-  #  https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/cloudbuild_trigger#example-usage---cloudbuild-trigger-build
-  #filename = "cloudbuild.yaml"
-}
-
-resource "google_cloud_run_service" "default" {
-  project  = google_project.default.project_id
-  name     = "main-cloud-run-service"
-  location = var.region
-
-  template {
-    spec {
-      containers {
-        image = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.default.repository_id}/bee-ci:latest"
-        ports {
-          container_port = 8080
-        }
-      }
-    }
-  }
-
-  traffic {
-    percent         = 100
-    latest_revision = true
-  }
-}
-
-data "google_iam_policy" "noauth" {
-  binding {
-    role = "roles/run.invoker"
-    members = [
-      "allUsers",
-    ]
-  }
-}
-
-resource "google_cloud_run_service_iam_policy" "noauth" {
-  location = google_cloud_run_service.default.location
-  project  = google_cloud_run_service.default.project
-  service  = google_cloud_run_service.default.name
-
-  policy_data = data.google_iam_policy.noauth.policy_data
-}
-
