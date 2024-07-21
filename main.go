@@ -29,7 +29,7 @@ func main() {
 	mux.HandleFunc("POST /webhook", handleWebhook)
 	mux.HandleFunc("POST /check-runs", handleCheckRuns)
 
-	err := http.ListenAndServe(fmt.Sprint(":", port), mux)
+	err := http.ListenAndServe(fmt.Sprint("0.0.0.0:", port), mux)
 	if err != nil {
 		slog.Error("failed to start listening", slog.Any("error", err))
 		os.Exit(1)
