@@ -7,17 +7,25 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"os"
 )
 
+const defaultPort = "8080"
+
 func main() {
-	log.Println("server is starting")
+	slog.Info("server is starting")
+	port := os.Getenv("PORT")
+	if port == "" {
+		slog.Info(fmt.Sprintf("PORT env var not set, using default port %s", defaultPort))
+		port = "8080"
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", index)
 	mux.HandleFunc("POST /webhook", handleWebhook)
 	mux.HandleFunc("POST /check-runs", handleCheckRuns)
 
-	err := http.ListenAndServe(":8080", mux)
+	err := http.ListenAndServe(fmt.Sprint(":", port), mux)
 	if err != nil {
 		log.Fatalln("Error listening: ", err)
 	}
@@ -37,7 +45,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		l.Error("error reading body", slog.Any("error", err))
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(fmt.Sprintf("Error reading body: %v", err)))
+		fmt.Fprintf(w, "Error reading body: %v", err)
 		return
 	}
 
