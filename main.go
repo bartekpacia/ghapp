@@ -21,7 +21,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", index)
+	mux.HandleFunc("GET /{$}", index)
 	mux.HandleFunc("POST /webhook", handleWebhook)
 	mux.HandleFunc("POST /check-runs", handleCheckRuns)
 
