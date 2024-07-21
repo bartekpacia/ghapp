@@ -7,4 +7,10 @@ docker build -t gcr.io/bee-ci/bee-ci:latest --platform linux/amd64 .
 
 gcloud builds submit \
   --project "$PROJECT_ID" \
-  --tag "us-central1-docker.pkg.dev/$PROJECT_ID/my-default-repo/bee-ci:latest"
+  --tag "us-central1-docker.pkg.dev/$PROJECT_ID/my-artifact-repository-manual/bee-ci:latest"
+
+gcloud run deploy my-cloud-run-service-manual \
+  --image "us-central1-docker.pkg.dev/$PROJECT_ID/my-artifact-repository-manual/bee-ci:latest" \
+  --region us-central1 \
+  --platform managed \
+  --allow-unauthenticated
