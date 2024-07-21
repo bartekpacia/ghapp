@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+message AnalyticsMessage {
+  // The timestamp of the log entry
+  string timestamp = 1;
+
+  // The severity level of the log entry
+  enum Severity {
+    DEFAULT = 0;
+    DEBUG = 1;
+    INFO = 2;
+    WARNING = 3;
+    ERROR = 4;
+    CRITICAL = 5;
+  }
+
+  Severity severity = 2;
+
+  // The log message
+  string message = 3;
+
+  // Additional metadata for the log entry
+  map<string, string> metadata = 4;
+}
