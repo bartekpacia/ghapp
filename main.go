@@ -4,15 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
+
+	"github.com/lmittmann/tint"
 )
 
 const defaultPort = "8080"
 
 func main() {
+	slog.SetDefault(setUpLogging())
+
 	slog.Info("server is starting")
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -27,7 +31,23 @@ func main() {
 
 	err := http.ListenAndServe(fmt.Sprint(":", port), mux)
 	if err != nil {
-		log.Fatalln("Error listening: ", err)
+		slog.Error("failed to start listening", slog.Any("error", err))
+		os.Exit(1)
+	}
+}
+
+func setUpLogging() *slog.Logger {
+	// Configure logging
+	logLevel := slog.LevelDebug
+	prod := os.Getenv("K_SERVICE") != "" // https://cloud.google.com/run/docs/container-contract#services-env-vars
+	if prod {
+		opts := slog.HandlerOptions{Level: logLevel}
+		handler := slog.NewJSONHandler(os.Stdout, &opts)
+		return slog.New(handler)
+	} else {
+		opts := tint.Options{Level: logLevel, TimeFormat: time.TimeOnly}
+		handler := tint.NewHandler(os.Stdout, &opts)
+		return slog.New(handler)
 	}
 }
 
@@ -84,21 +104,19 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCheckRuns(w http.ResponseWriter, r *http.Request) {
-	// fmt.Println("Request Headers: ", r.Header)
-	// reqBody, err := io.ReadAll(r.Body)
-	// if err != nil {
-	// 	fmt.Println("Error reading body: ", err)
+	// fmt.Println("Request Headers: ", r.Header) reqBody, err :=
+	// io.ReadAll(r.Body) if err != nil {
+	//  fmt.Println("Error reading body: ", err)
 	// }
 	//
-	// params := r.URL.Query()
-	// owner := params.Get("owner")
-	// repo := params.Get("repo")
-	// name := params.Get("name")
+	// params := r.URL.Query() owner := params.Get("owner") repo :=
+	// params.Get("repo") name := params.Get("name")
 	//
 	// body := []byte(`{
-	// 	"name": "linter",
-	// 	"head_sha": "1234567890abcdef",
+	//  "name": "linter",
+	//  "head_sha": "1234567890abcdef",
 	// }`)
 	//
-	// http.NewRequest("POST", "https://api.github.com/repos/:owner/:repo/check-runs", body)
+	// http.NewRequest("POST",
+	// "https://api.github.com/repos/:owner/:repo/check-runs", body)
 }

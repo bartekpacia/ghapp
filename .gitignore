@@ -2,3 +2,5 @@
 
 infra/terraform.tfvars
 infra/.terraform
+
+server
