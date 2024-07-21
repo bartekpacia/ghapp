@@ -1,8 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-PROJECT_ID=bee-ci
-
-gcloud builds submit \
-  --project "$PROJECT_ID" \
-  --tag "us-central1-docker.pkg.dev/$PROJECT_ID/my-default-repo/bee-ci:latest"

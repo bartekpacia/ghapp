@@ -66,7 +66,8 @@ resource "google_artifact_registry_repository" "default" {
 resource "google_cloud_run_service" "default" {
   project  = google_project.default.project_id
   location = var.region
-  name     = "my-cloud-run-service-tf"
+  name     = "main-cloud-run-service"
+  # name     = "my-cloud-run-service-tf"
 
   template {
     spec {
