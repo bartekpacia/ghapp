@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -64,6 +65,43 @@ func main() {
 		slog.Error("failed to start listening", slog.Any("error", err))
 		os.Exit(1)
 	}
+}
+
+func WithWebhookSecret(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Obtain the signature from the request
+		theirSignature := r.Header.Get("X-Hub-Signature-256")
+		parts := strings.Split(theirSignature, "=")
+		if len(parts) != 2 {
+			http.Error(w, "invalid webhook signature", http.StatusForbidden)
+			return
+		}
+		theirHexMac := parts[1]
+		theirMac, err := hex.DecodeString(theirHexMac)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error decoding webhook signature: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		// Calculate our own signature
+		payload, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error reading request body: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		hash := hmac.New(sha256.New, []byte(webhookSecret))
+		hash.Write(payload)
+		ourMac := hash.Sum(nil)
+
+		// Compare signatures
+		if !hmac.Equal(theirMac, ourMac) {
+			http.Error(w, "webhook signature is invalid", http.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func setUpLogging() *slog.Logger {
