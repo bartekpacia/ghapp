@@ -3,4 +3,5 @@
 infra/terraform.tfvars
 infra/.terraform
 
+# binary files
 server
