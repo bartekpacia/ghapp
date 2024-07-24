@@ -71,11 +71,32 @@ func setUpLogging() *slog.Logger {
 	logLevel := slog.LevelDebug
 	prod := os.Getenv("K_SERVICE") != "" // https://cloud.google.com/run/docs/container-contract#services-env-vars
 	if prod {
-		opts := slog.HandlerOptions{Level: logLevel}
-		handler := slog.NewJSONHandler(os.Stdout, &opts)
-		return slog.New(handler)
+		// Based on https://github.com/remko/cloudrun-slog
+		const LevelCritical = slog.Level(12)
+		opts := &slog.HandlerOptions{
+			AddSource: true,
+			Level:     logLevel,
+			ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+				switch a.Key {
+				case slog.MessageKey:
+					a.Key = "message"
+				case slog.SourceKey:
+					a.Key = "logging.googleapis.com/sourceLocation"
+				case slog.LevelKey:
+					a.Key = "severity"
+					level := a.Value.Any().(slog.Level)
+					if level == LevelCritical {
+						a.Value = slog.StringValue("CRITICAL")
+					}
+				}
+				return a
+			},
+		}
+
+		gcpHandler := slog.NewJSONHandler(os.Stderr, opts)
+		return slog.New(gcpHandler)
 	} else {
-		opts := tint.Options{Level: logLevel, TimeFormat: time.TimeOnly}
+		opts := tint.Options{Level: logLevel, TimeFormat: time.TimeOnly, AddSource: true}
 		handler := tint.NewHandler(os.Stdout, &opts)
 		return slog.New(handler)
 	}
