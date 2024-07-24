@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bradleyfalzon/ghinstallation/v2"
 	"github.com/lmittmann/tint"
 )
 
@@ -57,7 +57,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", index)
-	mux.HandleFunc("POST /webhook", handleWebhook)
+	mux.Handle("POST /webhook", WithWebhookSecret(http.HandlerFunc(handleWebhook)))
 	mux.HandleFunc("POST /check-runs", handleCheckRuns)
 
 	err = http.ListenAndServe(fmt.Sprint("0.0.0.0:", port), mux)
@@ -89,6 +89,7 @@ func WithWebhookSecret(next http.Handler) http.Handler {
 			http.Error(w, fmt.Sprintf("error reading request body: %v", err), http.StatusBadRequest)
 			return
 		}
+		r.Body = io.NopCloser(bytes.NewBuffer(payload)) // make body available for reading again
 
 		hash := hmac.New(sha256.New, []byte(webhookSecret))
 		hash.Write(payload)
@@ -148,22 +149,15 @@ func index(w http.ResponseWriter, r *http.Request) {
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	l := slog.With(slog.String("path", r.URL.Path))
 
-	l.Info("new request")
+	eventType := r.Header.Get("X-GitHub-Event")
+	l.Info("new request", slog.String("event", eventType))
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		l.Error("error reading body", slog.Any("error", err))
+		l.Error("error reading request body", slog.Any("error", err))
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "Error reading body: %v", err)
 		return
 	}
-
-	theirSignature := r.Header.Get("X-Hub-Signature-256")
-	actualDigest := strings.Split(theirSignature, "=")[1]
-	mac := hmac.New(sha256.New, []byte(webhookSecret))
-	mac.Write(body)
-	expectedDigest := mac.Sum(nil)
-	matchOK := hmac.Equal([]byte(actualDigest), expectedDigest)
-	l.Info("webhook signature", slog.String("actualDigest", actualDigest), slog.String("expectedDigest", string(expectedDigest)), slog.Bool("matchOK", matchOK))
 
 	var payload map[string]interface{}
 	err = json.Unmarshal([]byte(body), &payload)
@@ -174,20 +168,21 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	installationId := payload["installation"].(map[string]interface{})["id"].(int64)
+	fmt.Println("Payload: ", payload)
 
-	transport, err := ghinstallation.New(roundTripper, appId, installationId, []byte(privateKey))
-	if err != nil {
-		l.Error("error creating transport", slog.Any("error", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "Error creating transport: %v", err)
-		return
-	}
+	installationId := payload["installation"].(map[string]interface{})["id"]
+	slog.Info("installation id", slog.Any("id", installationId))
 
-	_ = transport
+	// transport, err := ghinstallation.New(roundTripper, appId, 69, []byte(privateKey))
+	// if err != nil {
+	// 	l.Error("error creating transport", slog.Any("error", err))
+	// 	w.WriteHeader(http.StatusInternalServerError)
+	// 	fmt.Fprintf(w, "Error creating transport: %v", err)
+	// 	return
+	// }
+	// _ = transport
 
 	// Check type of webhook event
-	eventType := r.Header.Get("X-GitHub-Event")
 	switch eventType {
 	case "installation":
 		// https://docs.github.com/en/webhooks/webhook-events-and-payloads?actionType=created#installation
