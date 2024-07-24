@@ -6,7 +6,7 @@ WORKDIR /tmp/server
 
 # Copy source files necessary to download dependencies
 COPY go.mod ./
-# COPY go.sum ./
+COPY go.sum ./
 RUN go mod download
 
 # Copy source files required for build
