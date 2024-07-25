@@ -151,16 +151,12 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	eventType := r.Header.Get("X-GitHub-Event")
 	l.Info("new request", slog.String("event", eventType))
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		l.Error("error reading request body", slog.Any("error", err))
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "Error reading body: %v", err)
-		return
-	}
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.UseNumber()
 
 	var payload map[string]interface{}
-	err = json.Unmarshal([]byte(body), &payload)
+	err := decoder.Decode(&payload)
 	if err != nil {
 		l.Error("error reading body", slog.Any("error", err))
 		w.WriteHeader(http.StatusBadRequest)
