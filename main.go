@@ -350,21 +350,21 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "Error creating check run: %v", err)
 			}
 		}
-	case "check_run":
-		// https://docs.github.com/en/webhooks/webhook-events-and-payloads?actionType=created#check_run
-		repository := payload["repository"].(map[string]interface{})
-		repoName := repository["name"].(string)
-		repoOwner := repository["owner"].(map[string]interface{})["login"].(string)
-
-		checkRun := payload["check_run"].(map[string]interface{})
-		headSHA := checkRun["head_sha"].(string)
-		err := createCheckRun(r.Context(), repoOwner, repoName, headSHA)
-		if err != nil {
-			msg := "error creating check run"
-			l.Error(msg, slog.Any("error", err))
-			http.Error(w, msg, http.StatusInternalServerError)
-			return
-		}
+	//case "check_run":
+	//	// https://docs.github.com/en/webhooks/webhook-events-and-payloads?actionType=created#check_run
+	//	repository := payload["repository"].(map[string]interface{})
+	//	repoName := repository["name"].(string)
+	//	repoOwner := repository["owner"].(map[string]interface{})["login"].(string)
+	//
+	//	checkRun := payload["check_run"].(map[string]interface{})
+	//	headSHA := checkRun["head_sha"].(string)
+	//	err := createCheckRun(r.Context(), repoOwner, repoName, headSHA)
+	//	if err != nil {
+	//		msg := "error creating check run"
+	//		l.Error(msg, slog.Any("error", err))
+	//		http.Error(w, msg, http.StatusInternalServerError)
+	//		return
+	//	}
 	default:
 		l.Error("unknown event type", slog.String("type", eventType))
 	}
@@ -374,7 +374,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 func createCheckRun(ctx context.Context, owner, repo, sha string) error {
 	body := map[string]interface{}{
-		"name":        "hello from bartek",
+		"name":        "hello from bartek at " + fmt.Sprint(time.Now().Format(time.RFC822Z)),
 		"head_sha":    sha,
 		"details_url": "https://garden.pacia.com",
 	}
