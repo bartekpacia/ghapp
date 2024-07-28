@@ -89,37 +89,6 @@ func main() {
 	}
 }
 
-func WithAuthenticatedApp(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		claims := jwt.MapClaims{
-			"iat": time.Now().Unix(),
-			"exp": time.Now().Add(10 * time.Minute).Unix(),
-			"iss": githubAppId,
-		}
-
-		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-		tokenStr, err := token.SignedString(rsaPrivateKey)
-		if err != nil {
-			slog.Error("error signing JWT", slog.Any("error", err))
-			http.Error(w, fmt.Sprintf("error signing JWT"), http.StatusInternalServerError)
-			return
-		}
-
-		appClient := http.Client{Transport: &BearerTransport{Token: tokenStr}}
-
-		ctx := context.WithValue(r.Context(), "gh_app_client", appClient)
-		r = r.Clone(ctx)
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-func WithAuthenticatedAppInstallation(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r)
-	})
-}
-
 func WithWebhookSecret(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Obtain the signature from the request
@@ -153,6 +122,114 @@ func WithWebhookSecret(next http.Handler) http.Handler {
 			http.Error(w, "webhook signature is invalid", http.StatusForbidden)
 			return
 		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func WithAuthenticatedApp(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := jwt.MapClaims{
+			"iat": time.Now().Unix(),
+			"exp": time.Now().Add(10 * time.Minute).Unix(),
+			"iss": githubAppId,
+		}
+
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenStr, err := token.SignedString(rsaPrivateKey)
+		if err != nil {
+			slog.Error("error signing JWT", slog.Any("error", err))
+			http.Error(w, "error signing JWT", http.StatusInternalServerError)
+			return
+		}
+
+		appClient := http.Client{Transport: &BearerTransport{Token: tokenStr}}
+
+		ctx := context.WithValue(r.Context(), "gh_app_client", appClient)
+		r = r.Clone(ctx)
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func WithAuthenticatedAppInstallation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// read request body
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error reading request body: %v", err), http.StatusBadRequest)
+			return
+		}
+		body := bytes.NewBuffer(b)
+		r.Body = io.NopCloser(bytes.NewBuffer(bytes.Clone(b))) // make body available for reading again
+
+		// decode body from JSON into a map
+		decoder := json.NewDecoder(body)
+		decoder.UseNumber()
+
+		var payload map[string]interface{}
+		err = decoder.Decode(&payload)
+		if err != nil {
+			slog.Error("error reading body", slog.Any("error", err))
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, "Error reading body: %v", err)
+			return
+		}
+
+		// extract installation ID from the request body
+
+		installationIdStr := payload["installation"].(map[string]interface{})["id"].(json.Number).String()
+		installationId, err := strconv.ParseInt(installationIdStr, 10, 64)
+		if err != nil {
+			slog.Error("error parsing installation id", slog.Any("error", err))
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, "Error parsing installation id: %v", err)
+			return
+		}
+
+		// get app installation access token
+
+		url := fmt.Sprintf("https://api.github.com/app/installations/%d/access_tokens", installationId)
+		appClient := r.Context().Value("gh_app_client").(http.Client)
+		res, err := appClient.Post(url, "application/json", nil)
+		if err != nil {
+			msg := "error calling endpoint " + url
+			slog.Error(msg, slog.Any("error", err))
+			http.Error(w, msg, http.StatusInternalServerError)
+			return
+		}
+
+		// read response body and extract the access token
+
+		// read body
+		b, err = io.ReadAll(res.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error reading request body: %v", err), http.StatusBadRequest)
+			return
+		}
+		body = bytes.NewBuffer(b)
+
+		// decode body from JSON into a map
+		decoder = json.NewDecoder(body)
+		decoder.UseNumber()
+
+		clear(payload)
+		err = decoder.Decode(&payload)
+		if err != nil {
+			msg := fmt.Sprint("error reading response body from " + res.Request.URL.String())
+			slog.Error(msg, slog.Any("error", err))
+			http.Error(w, msg, http.StatusInternalServerError)
+			return
+		}
+
+		appInstallationToken := payload["token"].(string)
+		appInstallationClient := http.Client{
+			Transport: &BearerTransport{Token: appInstallationToken},
+		}
+		slog.Info("installation access token obtained", slog.Any("token", appInstallationToken))
+
+		ctx := context.WithValue(r.Context(), "gh_installation_client", appInstallationClient)
+		r = r.Clone(ctx)
 
 		next.ServeHTTP(w, r)
 	})
@@ -210,9 +287,9 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	var payload map[string]interface{}
 	err := decoder.Decode(&payload)
 	if err != nil {
-		l.Error("error reading body", slog.Any("error", err))
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "Error reading body: %v", err)
+		msg := "error reading request body"
+		l.Error(msg, slog.Any("error", err))
+		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
 
@@ -259,7 +336,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 		// https://docs.github.com/en/webhooks/webhook-events-and-payloads?actionType=requested#check_suite
 		if payload["action"] == "requested" || payload["action"] == "rerequested" {
 			repository := payload["repository"].(map[string]interface{})
-			repoName := repository["full_name"].(string)
+			repoName := repository["name"].(string)
 			repoOwner := repository["owner"].(map[string]interface{})["login"].(string)
 
 			checkSuite := payload["check_suite"].(map[string]interface{})
@@ -276,12 +353,18 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	case "check_run":
 		// https://docs.github.com/en/webhooks/webhook-events-and-payloads?actionType=created#check_run
 		repository := payload["repository"].(map[string]interface{})
-		repoName := repository["full_name"].(string)
+		repoName := repository["name"].(string)
 		repoOwner := repository["owner"].(map[string]interface{})["login"].(string)
 
 		checkRun := payload["check_run"].(map[string]interface{})
 		headSHA := checkRun["head_sha"].(string)
-		createCheckRun(r.Context(), repoOwner, repoName, headSHA)
+		err := createCheckRun(r.Context(), repoOwner, repoName, headSHA)
+		if err != nil {
+			msg := "error creating check run"
+			l.Error(msg, slog.Any("error", err))
+			http.Error(w, msg, http.StatusInternalServerError)
+			return
+		}
 	default:
 		l.Error("unknown event type", slog.String("type", eventType))
 	}
@@ -305,25 +388,24 @@ func createCheckRun(ctx context.Context, owner, repo, sha string) error {
 	if err != nil {
 		return fmt.Errorf("error creating request: %w", err)
 	}
+	slog.Info("request created", slog.String("url", url), slog.String("body", string(bodyBytes)))
 
 	req.Header.Set("Accept", "application/vnd.github+json")
 
-	httpClient := http.Client{
-		Timeout: 10 * time.Second,
-	}
+	githubInstallationClient := ctx.Value("gh_installation_client").(http.Client)
 
-	resp, err := httpClient.Do(req)
+	res, err := githubInstallationClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("error sending request: %w", err)
 	}
 
 	respBody := make([]byte, 0)
-	_, err = resp.Body.Read(respBody)
+	_, err = res.Body.Read(respBody)
 	if err != nil {
 		return fmt.Errorf("error reading response body: %w", err)
 	}
 
-	slog.Info("request made", slog.Int("status", resp.StatusCode), slog.String("body", string(respBody)))
+	slog.Info("request made", slog.Int("status", res.StatusCode), slog.String("body", string(respBody)))
 
 	return nil
 }
