@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -16,16 +18,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bradleyfalzon/ghinstallation"
+	// "github.com/bradleyfalzon/ghinstallation"
+
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/lmittmann/tint"
 )
 
 const defaultPort = "8080"
 
 var (
-	appId         int64
+	githubAppId   int64
 	webhookSecret string
-	privateKey    []byte
+	rsaPrivateKey *rsa.PrivateKey
 )
 
 var roundTripper = http.DefaultTransport
@@ -34,7 +38,7 @@ func main() {
 	slog.SetDefault(setUpLogging())
 
 	var err error
-	appId, err = strconv.ParseInt(os.Getenv("GITHUB_APP_ID"), 10, 64)
+	githubAppId, err = strconv.ParseInt(os.Getenv("GITHUB_APP_ID"), 10, 64)
 	if err != nil {
 		slog.Error("APP_ID env var not set or not a valid int64", slog.Any("error", err))
 		os.Exit(1)
@@ -49,10 +53,15 @@ func main() {
 		slog.Error("GITHUB_APP_PRIVATE_KEY_BASE64 env var not set")
 		os.Exit(1)
 	}
-	privateKey, err = base64.StdEncoding.DecodeString(privateKeyBase64)
+	privateKey, err := base64.StdEncoding.DecodeString(privateKeyBase64)
 	if err != nil {
-		slog.Error("error decoding base64 private key", slog.Any("error", err))
+		slog.Error("error decoding GitHub App private key from base64", slog.Any("error", err))
 		os.Exit(1)
+	}
+
+	rsaPrivateKey, err = jwt.ParseRSAPrivateKeyFromPEM(privateKey)
+	if err != nil {
+		slog.Error("error parsing GitHub App RSA private key from PEM", slog.Any("error", err))
 	}
 
 	slog.Info("server is starting")
@@ -64,14 +73,51 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", index)
-	mux.Handle("POST /webhook", WithWebhookSecret(http.HandlerFunc(handleWebhook)))
-	mux.HandleFunc("POST /check-runs", handleCheckRuns)
+	mux.Handle("POST /webhook", WithWebhookSecret(
+		WithAuthenticatedApp( // provides gh_app_client
+			WithAuthenticatedAppInstallation( // provides gh_installation_client
+				http.HandlerFunc(handleWebhook),
+			),
+		),
+	),
+	)
 
 	err = http.ListenAndServe(fmt.Sprint("0.0.0.0:", port), mux)
 	if err != nil {
 		slog.Error("failed to start listening", slog.Any("error", err))
 		os.Exit(1)
 	}
+}
+
+func WithAuthenticatedApp(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := jwt.MapClaims{
+			"iat": time.Now().Unix(),
+			"exp": time.Now().Add(10 * time.Minute).Unix(),
+			"iss": githubAppId,
+		}
+
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		tokenStr, err := token.SignedString(rsaPrivateKey)
+		if err != nil {
+			slog.Error("error signing JWT", slog.Any("error", err))
+			http.Error(w, fmt.Sprintf("error signing JWT"), http.StatusInternalServerError)
+			return
+		}
+
+		appClient := http.Client{Transport: &BearerTransport{Token: tokenStr}}
+
+		ctx := context.WithValue(r.Context(), "gh_app_client", appClient)
+		r = r.Clone(ctx)
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func WithAuthenticatedAppInstallation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+	})
 }
 
 func WithWebhookSecret(next http.Handler) http.Handler {
@@ -157,7 +203,6 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	l := slog.With(slog.String("path", r.URL.Path))
 
 	eventType := r.Header.Get("X-GitHub-Event")
-	l.Info("new request", slog.String("event", eventType))
 
 	decoder := json.NewDecoder(r.Body)
 	decoder.UseNumber()
@@ -179,25 +224,36 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Error parsing installation id: %v", err)
 		return
 	}
-	slog.Info("installation id", slog.Any("id", installationId), slog.String("type", fmt.Sprintf("%T", installationId)))
 
-	transport, err := ghinstallation.New(roundTripper, appId, installationId, privateKey)
-	if err != nil {
-		l.Error("error creating transport", slog.Any("error", err))
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "Error creating transport: %v", err)
-		return
-	}
-	_ = transport
+	action, _ := payload["action"].(string)
+	l.Info("new request",
+		slog.String("event", eventType),
+		slog.Any("action", action),
+		slog.Int64("id", installationId),
+	)
+
+	// transport, err := ghinstallation.New(roundTripper, githubAppId, installationId, privateKey)
+	// if err != nil {
+	// 	l.Error("error creating transport", slog.Any("error", err))
+	// 	w.WriteHeader(http.StatusInternalServerError)
+	// 	fmt.Fprintf(w, "Error creating transport: %v", err)
+	// 	return
+	// }
+	// _ = transport
 
 	// Check type of webhook event
 	switch eventType {
 	case "installation":
+		installation := payload["installation"].(map[string]interface{})
+		login := installation["account"].(map[string]interface{})["login"].(string)
+
 		// https://docs.github.com/en/webhooks/webhook-events-and-payloads?actionType=created#installation
 		if payload["action"] == "created" {
-			repository := payload["repository"].(map[string]interface{})
-			fullName := repository["full_name"].(string)
-			l.Info("installation created", slog.Any("repo", fullName))
+			repositories := payload["repositories"].([]interface{})
+			l.Info("app installation created", slog.Any("id", installation["id"]), slog.String("login", login), slog.Int("repositories", len(repositories)))
+		}
+		if payload["action"] == "deleted" {
+			l.Info("app installation deleted", slog.Any("id", installation["id"]), slog.String("login", login))
 		}
 	case "check_suite":
 		// https://docs.github.com/en/webhooks/webhook-events-and-payloads?actionType=requested#check_suite
@@ -210,7 +266,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 			headSHA := checkSuite["head_sha"].(string)
 			l.Info("check suite requested", slog.String("owner", repoOwner), slog.String("repo", repoName), slog.String("head_sha", headSHA))
 
-			err := createCheckRun(repoOwner, repoName, headSHA)
+			err := createCheckRun(r.Context(), repoOwner, repoName, headSHA)
 			if err != nil {
 				l.Error("error creating check run", slog.Any("error", err))
 				w.WriteHeader(http.StatusInternalServerError)
@@ -225,7 +281,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 		checkRun := payload["check_run"].(map[string]interface{})
 		headSHA := checkRun["head_sha"].(string)
-		createCheckRun(repoOwner, repoName, headSHA)
+		createCheckRun(r.Context(), repoOwner, repoName, headSHA)
 	default:
 		l.Error("unknown event type", slog.String("type", eventType))
 	}
@@ -233,7 +289,7 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 // TODO: accept context, and access logger and authenticated HTTP client from there?
 
-func createCheckRun(owner, repo, sha string) error {
+func createCheckRun(ctx context.Context, owner, repo, sha string) error {
 	body := map[string]interface{}{
 		"name":        "hello from bartek",
 		"head_sha":    sha,
