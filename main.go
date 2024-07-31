@@ -73,6 +73,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", index)
+	mux.HandleFunc("GET /github/callback", handleAuthCallback)
 	mux.Handle("POST /webhook", WithWebhookSecret(
 		WithAuthenticatedApp( // provides gh_app_client
 			WithAuthenticatedAppInstallation( // provides gh_installation_client
@@ -87,6 +88,16 @@ func main() {
 		slog.Error("failed to start listening", slog.Any("error", err))
 		os.Exit(1)
 	}
+}
+
+func handleAuthCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		http.Error(w, "missing code query parameter", http.StatusBadRequest)
+		return
+	}
+
+	fmt.Fprintf(w, "Successfully authorized! Got code %s.", code)
 }
 
 func WithWebhookSecret(next http.Handler) http.Handler {
